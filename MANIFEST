@@ -2,5 +2,5 @@ Changes
 Makefile.PL
 MANIFEST
 README
-template.pm
+Template.pm
 t/1.t

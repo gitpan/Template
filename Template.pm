@@ -1,36 +1,41 @@
-package template;
+package Template;
 require 5.008;
-$VERSION = "1.11";
+$VERSION = "1.21";
 
 #
-# template - модуль работы с шаблонами 
+# Template - модуль работы с шаблонами 
 #
-# Version: 1.11 
-# Date   : 28.04.2006
+# Version: 1.21 
+# Date   : 16.05.2006
 #
 
 =head1 NAME
 
-template - Templates processing module 
+Template - Templates processing module 
 
 =head1 VERSION
 
-Version 1.11 
-28.04.2006
+Version 1.21 
+16.05.2006
 
 =head1 SYNOPSIS
     
 print "Content-type: text/html\n\n";
 unshift(@INC,module_directory_absolute_path);
-require template;
+require Template;
+
+or: 
+
+use lib module_directory_absolute_path;
+use Template; 
 
 =head2 Object $template creation
 
-$template = new template(template_file,username,user_password, cache_files_absolute_path);
+$template = new Template(template_file,username,user_password, cache_files_absolute_path, timeout);
 
 =head2 Update object $template
 
-$template->update(template_file,username,user_password, cache_files_absolute_path);
+$template->update(template_file,username,user_password, cache_files_absolute_path, timeout);
 
 =over 8
 
@@ -53,6 +58,10 @@ B<User password> of virtual client. See L<username>
 =item cache_files_absolute_path
 
 B<Absolute path> to the cache directory. Cache will not be used when this parameter is not presented.
+
+=item timeout
+
+B<Timeout> is the period (in seconds) of template's updating delay. Default value is 1200 seconds
 
 =back
 
@@ -130,6 +139,9 @@ The usual warnings if it cannot read or write the files involved.
 
 1.11 Inner method's interface had structured
 
+1.21 New time managment for templates caching. You can set how long
+     template file will be cached before renew. 
+
 =head1 THANKS
 
 Thanks to Andrew Syrba for useful and valuable information 
@@ -152,39 +164,54 @@ BEGIN {
 }
 
 sub new {
-    my ($class, $file, $login, $password, $cachedir) = @_;
+    my ($class, $file, $login, $password, $cachedir, $timeout) = @_;
     my $self = {};                       # Определяем объект
+    $self{timeout} = $timeout || 1200;   # Таймаут доступа к шаблону (30 минут)
+    $self{file} = $file || 'index.shtml';# Имя файла шаблона
     $self{login} = $login       || '';   # Логин виртуального клиента 
     $self{password} = $password || '';   # Пароль виртуального клиента
-    $self{template}= &geturl($file,$login,$password); # Принимаем ресурс
     $self{cachedir}=$cachedir || '';       # Путь до файлов кэша
-    if ($self{cachedir}) {                # Указан путь до кэша?
-      if ($self{template} eq '') {       # Не прочитался кэш? 
-        $self{template}=&load_cache($file,$self{cachedir});
-      } else {                           # Прочитался кэш?
-        &save_cache($file,$self{cachedir},$self{template});
+    
+    if (&timeout_ok($file,$self{cachedir})) {     
+      $self{template}= &geturl($file,$login,$password); # Принимаем ресурс
+      if ($self{cachedir}) {                # Указан путь до кэша?
+          if ($self{template} eq '') {       # Не прочитался кэш? 
+            $self{template}=&load_cache($file,$self{cachedir});
+          } else {                           # Прочитался кэш?
+            &save_cache($file,$self{cachedir},$self{template});
+          }
       }
+    } else {
+      $self{template}=&load_cache($file,$self{cachedir});
     }
+
     &template_error ("Ошибка получения ресурса<br><br><i>$file</i>") unless $self{template};
     bless $self, $class;                 # Создаем объект!
     return $self;
 }
-
-sub update{
-    my ($self, $file, $login, $password, $cachedir) = @_;
+#&cachefilename($self{file},$self{cachedir}).'<br>\n'.
+sub update {
+    my ($self, $file, $login, $password, $cachedir, $timeout) = @_;
     $self = {};
-    $self{login} = $login;
-    $self{password} = $password;
-    $self{template}= &geturl($file,$login,$password);
-    $self{cachedir}=$cachedir;
+    $self{timeout} = $timeout || 1200;   # Таймаут доступа к шаблону (20 минут)
+    $self{login} = $login  || '';
+    $self{password} = $password || '';
+    $self{cachedir}=$cachedir || '';
+    $self{file} = $file || 'index.shtml';# Имя файла шаблона
 
-    if ($self{cachedir}) {
-      if ($self{template} eq '') {
-        $self{template}=&load_cache ($file,$self{cachedir});
-      } else {                    
-        &save_cache ($file,$self{cachedir},$self{template});
+    if (&timeout_ok($file,$self{cachedir})) {     
+      $self{template}= &geturl($file,$login,$password);
+      if ($self{cachedir}) {
+        if ($self{template} eq '') {
+          $self{template}=&load_cache ($file,$self{cachedir});
+        } else {                    
+          &save_cache ($file,$self{cachedir},$self{template});
+        }
       }
+    } else {
+      $self{template}=&load_cache($file,$self{cachedir});
     }
+
     &template_error ("Ошибка получения ресурса<br><br><i>$file</i>") unless $self{template};
     return $self;
 }
@@ -322,6 +349,22 @@ print <<"HTML";
   </body></html>
 HTML
 exit;
+}
+sub timeout_ok {
+ my ($file,$cachedir)=@_;
+ if ($cachedir and $file) {
+  $file=~s/(\.)|(\/)|(\\)|(:)|(\?)|(\&)|(\%)/_/g;
+  my $path_and_file=$cachedir.'/'.$file;
+
+  my @statfile = stat($path_and_file);
+  if ((time-$statfile[9]) > $self{timeout}) {
+   return 1;
+  } else {
+   return 0;
+  } 
+ } else {
+  return 1;
+ } 
 }
 
 sub AUTOLOAD {
